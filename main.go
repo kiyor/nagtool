@@ -6,7 +6,7 @@
 
 * Creation Date : 01-15-2014
 
-* Last Modified : Wed 14 May 2014 07:00:58 PM UTC
+* Last Modified : Fri 16 May 2014 10:52:14 PM UTC
 
 * Created By : Kiyor
 
@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"github.com/kiyor/gourl/lib"
 	"github.com/kiyor/nagiosToJson"
+	"github.com/wsxiaoys/terminal/color"
 	"io/ioutil"
 	"log"
 	"os"
@@ -67,6 +68,12 @@ func setStatByUrl(url string) {
 	}
 	nagiosToJson.SetStatFile("/tmp/temp.dat")
 }
+func chkReErr(err error) {
+	if err != nil {
+		log.Fatalln(err.Error())
+		os.Exit(1)
+	}
+}
 
 // still a lot of duplicate code, need make it clean and might use single func just pass nagios api command
 func main() {
@@ -79,23 +86,38 @@ func main() {
 	} else {
 		create := str2time(stat.Info.Created)
 		fmt.Println("data Created from", time.Since(create), "ago")
+		title()
+		var reh, res *regexp.Regexp
+		var err error
+		if *mutehost != "" {
+			reh, err = regexp.Compile(`.*` + *mutehost + `.*`)
+			chkReErr(err)
+		} else {
+			reh, err = regexp.Compile(`.*` + *unmutehost + `.*`)
+			chkReErr(err)
+		}
+		if *muteservice != "" {
+			res, err = regexp.Compile(`.*` + *muteservice + `.*`)
+			chkReErr(err)
+		} else {
+			res, err = regexp.Compile(`.*` + *unmuteservice + `.*`)
+			chkReErr(err)
+		}
+		// for loop all element by hostname
 		for hostname, v := range stat.Hoststatus {
+			// main if statement for flag
 			if *cleanmute {
+				// sub if statement for logic
 				if !notifications(v) && state(v) == 0 && !acknowledged(v) && active(v) {
-					output(hostname, "", v)
+					output(hostname, "HOST", v)
 					if *e {
 						c := fmt.Sprintf("echo \"[%d] ENABLE_HOST_NOTIFICATIONS;%s\n\" > %s", time.Now().Unix(), hostname, *cmdfile)
 						run(c)
 					}
 				}
 			} else if *mutehost != "" {
-				re, err := regexp.Compile(`.*` + *mutehost + `.*`)
-				if err != nil {
-					log.Fatalln(err.Error())
-					os.Exit(1)
-				}
-				if re.MatchString(hostname) {
-					output(hostname, "", v)
+				if reh.MatchString(hostname) && *muteservice == "" {
+					output(hostname, "HOST", v)
 					if *e {
 						c := fmt.Sprintf("echo \"[%d] DISABLE_HOST_NOTIFICATIONS;%s\n\" > %s", time.Now().Unix(), hostname, *cmdfile)
 						run(c)
@@ -104,19 +126,16 @@ func main() {
 					}
 				}
 			} else if *unmutehost != "" {
-				re, err := regexp.Compile(`.*` + *unmutehost + `.*`)
-				if err != nil {
-					log.Fatalln(err.Error())
-					os.Exit(1)
-				}
-				if re.MatchString(hostname) && !notifications(v) && state(v) == 0 && !acknowledged(v) && active(v) {
-					output(hostname, "", v)
+				if reh.MatchString(hostname) && !notifications(v) && state(v) == 0 && !acknowledged(v) && active(v) {
+					output(hostname, "HOST", v)
 					if *e {
 						c := fmt.Sprintf("echo \"[%d] ENABLE_HOST_NOTIFICATIONS;%s\n\" > %s", time.Now().Unix(), hostname, *cmdfile)
 						run(c)
 					}
 				}
 			}
+
+			// for loop all element by servicename
 			for servicename, v2 := range v.Servicestatus {
 				if *cleanmute {
 					if !notifications(v2) && state(v2) == 0 && !acknowledged(v2) && active(v2) {
@@ -127,12 +146,14 @@ func main() {
 						}
 					}
 				} else if *muteservice != "" {
-					re, err := regexp.Compile(`.*` + *muteservice + `.*`)
-					if err != nil {
-						log.Fatalln(err.Error())
-						os.Exit(1)
+					// if more than one logic then use bool variable help
+					var send bool
+					if *mutehost != "" {
+						if reh.MatchString(hostname) && res.MatchString(servicename) {
+							send = true
+						}
 					}
-					if re.MatchString(servicename) {
+					if (*mutehost == "" && res.MatchString(servicename)) || send { // if only related on service or host&service name all true, then output
 						output(hostname, servicename, v2)
 						if *e {
 							c := fmt.Sprintf("echo \"[%d] DISABLE_SVC_NOTIFICATIONS;%s;%s\n\" > %s", time.Now().Unix(), hostname, servicename, *cmdfile)
@@ -140,12 +161,13 @@ func main() {
 						}
 					}
 				} else if *unmuteservice != "" {
-					re, err := regexp.Compile(`.*` + *unmuteservice + `.*`)
-					if err != nil {
-						log.Fatalln(err.Error())
-						os.Exit(1)
+					var send bool
+					if *unmutehost != "" {
+						if reh.MatchString(hostname) && res.MatchString(servicename) {
+							send = true
+						}
 					}
-					if re.MatchString(servicename) && !notifications(v2) && state(v2) == 0 && !acknowledged(v2) && active(v2) {
+					if (send || (*unmutehost == "" && res.MatchString(servicename))) && !notifications(v2) && state(v2) == 0 && !acknowledged(v2) && active(v2) { // if service name match and muted, state is good and not acked, active checked
 						output(hostname, servicename, v2)
 						if *e {
 							c := fmt.Sprintf("echo \"[%d] ENABLE_SVC_NOTIFICATIONS;%s;%s\n\" > %s", time.Now().Unix(), hostname, servicename, *cmdfile)
@@ -154,12 +176,7 @@ func main() {
 
 					}
 				} else if *unmutehost != "" {
-					re, err := regexp.Compile(`.*` + *unmutehost + `.*`)
-					if err != nil {
-						log.Fatalln(err.Error())
-						os.Exit(1)
-					}
-					if re.MatchString(hostname) && !notifications(v2) && state(v2) == 0 && !acknowledged(v2) && active(v2) {
+					if reh.MatchString(hostname) && !notifications(v2) && state(v2) == 0 && !acknowledged(v2) && active(v2) { // if hostname match and muted, state is good and not acked, active checked
 						output(hostname, servicename, v2)
 						if *e {
 							c := fmt.Sprintf("echo \"[%d] ENABLE_SVC_NOTIFICATIONS;%s;%s\n\" > %s", time.Now().Unix(), hostname, servicename, *cmdfile)
@@ -254,13 +271,45 @@ func acknowledged(v interface{}) bool {
 }
 
 // define output in one place, make it clean
+func title() {
+	// use HOST as host check servicename
+	// 	if *mutehost != "" {
+	// 		color.Printf("%-10s: %v %-10v %v %v\n", "hostname", "alert", "state", "acked", "output")
+	// 	}
+	// 	if *muteservice != "" {
+	color.Printf("%-10s: %-10v %v %-10v %v %v\n", "hostname", "srvname", "alert", "state", "acked", "output")
+	// 	}
+}
+
 func output(hostname, servicename, v interface{}) {
+	// define quick color/graphic view of output
+	var s, m, a string
+	if state(v) == 0 {
+		s = color.Sprintf("@{g}%-10s", "[OK]")
+	} else if state(v) == 1 {
+		s = color.Sprintf("@{y}%-10s", "[WARNING]")
+	} else if state(v) == 2 {
+		s = color.Sprintf("@{r}%-10s", "[CRITICAL]")
+	}
+	if notifications(v) {
+		m = color.Sprintf("@{g}  %v  ", ` `)
+	} else {
+		m = color.Sprintf("@{r}  %v  ", `Ø`)
+	}
+	if acknowledged(v) {
+		a = color.Sprintf("@{g}  %v  ", `√`)
+	} else {
+		a = color.Sprintf("@{g}  %v  ", ` `)
+	}
+
+	// this just incase if change mind use different syntax
 	switch v := v.(type) {
 	default:
 	case *nagiosToJson.Hoststatus:
-		fmt.Println(hostname, v.Plugin_output, time.Since(str2time(v.Last_check)))
+		// 		color.Printf("%-10s: %v %v %v %v %v\n", hostname, m, s, a, v.Plugin_output, time.Since(str2time(v.Last_check)))
+		color.Printf("%-10s: %-10v %v %v %v %v %v\n", hostname, servicename, m, s, a, v.Plugin_output, time.Since(str2time(v.Last_check)))
 	case *nagiosToJson.Servicestatus:
-		fmt.Println(hostname, servicename, v.Plugin_output, time.Since(str2time(v.Last_check)))
+		color.Printf("%-10s: %-10v %v %v %v %v %v\n", hostname, servicename, m, s, a, v.Plugin_output, time.Since(str2time(v.Last_check)))
 	}
 }
 

@@ -15,3 +15,5 @@ more func are sting appending
 ./nagtool -unmuteservice "SERVICENAME" #same above but unmute, it only list the service is not having problem now.
 ./nagtool -all #instead of do any sorting, list all the info by json format, not able to do exec
 ```
+- able to use mutehost and muteservice at same time, unmutehost and unmuteservice at same time, but not mute with unmute
+- more Function like ack are still implementing
